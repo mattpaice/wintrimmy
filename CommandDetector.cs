@@ -1,116 +1,78 @@
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace WinTrimmy;
 
 public class CommandDetector
 {
-    private readonly AppSettings _settings;
+    private static readonly Regex BoxDrawingCharacters = new(@"[│┃┆┇┊┋]", RegexOptions.Compiled);
+    private static readonly Regex DoubleSpaces = new(@" {2,}", RegexOptions.Compiled);
+    private static readonly Regex BoxCleanupPattern = new(@"(?<!\n)([A-Z0-9_.-])\s*\n\s*([A-Z0-9_.-])(?!\n)", RegexOptions.Compiled);
+    private static readonly Regex CommandPreamble = new(@"(?m)^\s*(sudo\s+)?[A-Za-z0-9./~_-]+", RegexOptions.Compiled);
+    private static readonly Regex PipePattern = new(@"\|", RegexOptions.Compiled);
+    private static readonly Regex ChainOperatorsPattern = new(@"&&|;|\|\||&", RegexOptions.Compiled);
+    private static readonly Regex PromptPattern = new(@"(^|\n)\s*\$", RegexOptions.Compiled | RegexOptions.Multiline);
+    private static readonly Regex WordCharacterAfterSpace = new(@"[-/]", RegexOptions.Compiled);
+    private static readonly Regex WhitespaceCollapse = new(@"\s+", RegexOptions.Compiled);
+    private static readonly Regex LineCollapse = new(@"\n+", RegexOptions.Compiled);
+    private static readonly Regex BackslashContinuation = new(@"\\\s*\n", RegexOptions.Compiled);
+    private static readonly Regex CommonCommandsPattern = new(@"(?mi)^\s*(sudo|apt|yum|brew|npm|yarn|pip|cargo|dotnet|git|docker|kubectl|helm|az|gcloud|terraform)\b", RegexOptions.Compiled);
+    private static readonly Regex LongFlagPattern = new(@"--[A-Za-z0-9-]+", RegexOptions.Compiled);
+    private static readonly Regex ShortFlagPattern = new(@"(?<!-)-[A-Za-z0-9]", RegexOptions.Compiled);
+    private static readonly Regex DirectoryCommandPattern = new(@"(?mi)^\s*(cd|export|set|source)\b", RegexOptions.Compiled);
+    private static readonly Regex ScriptInvocationPattern = new(@"(?mi)^\s*\.[\\/]", RegexOptions.Compiled);
 
-    public CommandDetector(AppSettings settings)
+    private readonly ITrimSettings _settings;
+
+    public CommandDetector(ITrimSettings settings)
     {
         _settings = settings;
     }
 
-    public string CleanBoxDrawingCharacters(string text)
+    public string? CleanBoxDrawingCharacters(string text)
     {
-        if (!_settings.RemoveBoxDrawing) return text;
+        if (!_settings.RemoveBoxDrawing) return null;
+        if (!BoxDrawingCharacters.IsMatch(text)) return null;
 
-        // Remove box drawing characters (│) commonly used in terminal borders
-        var cleaned = Regex.Replace(text, @"[│┃┆┇┊┋]", " ");
-        // Collapse multiple spaces into single space
-        cleaned = Regex.Replace(cleaned, @"  +", " ");
-        return cleaned.Trim();
+        var cleaned = BoxDrawingCharacters.Replace(text, " ");
+        cleaned = DoubleSpaces.Replace(cleaned, " ");
+        cleaned = cleaned.Trim();
+
+        return cleaned == text ? null : cleaned;
     }
 
     public string? TransformIfCommand(string text)
     {
-        var lines = text.Split('\n').Select(l => l.TrimEnd('\r')).ToArray();
+        if (!text.Contains('\n')) return null;
 
-        // Skip if too many lines (safety measure)
-        if (lines.Length > 10 && _settings.Aggressiveness != Aggressiveness.High)
-        {
-            return null;
-        }
+        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.TrimEnd('\r'))
+            .ToArray();
+        if (lines.Length < 2 || lines.Length > 10) return null;
 
-        if (lines.Length > 10)
-        {
-            return null; // Even in high mode, skip very long content
-        }
+        var score = CalculateCommandScore(text, lines);
+        if (score < _settings.Aggressiveness.ScoreThreshold()) return null;
 
-        // Single line doesn't need flattening
-        if (lines.Length <= 1) return null;
-
-        var score = CalculateCommandScore(lines);
-
-        if (score >= _settings.Aggressiveness.ScoreThreshold())
-        {
-            return Flatten(text);
-        }
-
-        return null;
+        var flattened = Flatten(text);
+        return flattened == text ? null : flattened;
     }
 
-    private int CalculateCommandScore(string[] lines)
+    private int CalculateCommandScore(string text, string[] lines)
     {
-        int score = 0;
+        var score = 0;
+        if (text.Contains("\\\n")) score += 1;
+        if (PipePattern.IsMatch(text)) score += 1;
+        if (ChainOperatorsPattern.IsMatch(text)) score += 1;
+        if (PromptPattern.IsMatch(text)) score += 1;
+        if (lines.All(IsLikelyCommandLine)) score += 1;
+        if (CommandPreamble.IsMatch(text)) score += 1;
+        if (WordCharacterAfterSpace.IsMatch(text)) score += 1;
+        if (CommonCommandsPattern.IsMatch(text)) score += 1;
+        if (LongFlagPattern.IsMatch(text) || ShortFlagPattern.IsMatch(text)) score += 1;
+        if (DirectoryCommandPattern.IsMatch(text)) score += 1;
+        if (ScriptInvocationPattern.IsMatch(text)) score += 1;
 
-        // Check for line continuations (backslash at end)
-        if (lines.Any(l => l.TrimEnd().EndsWith("\\")))
-        {
-            score += 4;
-        }
-
-        // Check for pipes
-        if (lines.Any(l => l.Contains('|')))
-        {
-            score += 2;
-        }
-
-        // Check for common shell prompts
-        if (lines.Any(l => l.TrimStart().StartsWith("$") || l.TrimStart().StartsWith(">")))
-        {
-            score += 2;
-        }
-
-        // Check for command-like patterns
-        var commandPatterns = new[]
-        {
-            @"^\s*(sudo|apt|yum|brew|npm|yarn|pip|cargo|dotnet|git|docker|kubectl)\s+",
-            @"^\s*\w+\s+--\w+",  // flags like --verbose
-            @"^\s*\w+\s+-\w+",   // flags like -v
-            @"&&|;|\|\|",        // command chaining
-            @"^\s*cd\s+",
-            @"^\s*export\s+",
-            @"^\s*set\s+",
-            @"^\s*\.[\\/]",      // ./script or .\script
-        };
-
-        foreach (var pattern in commandPatterns)
-        {
-            if (lines.Any(l => Regex.IsMatch(l, pattern)))
-            {
-                score += 2;
-            }
-        }
-
-        // Penalty for prose-like content
-        if (lines.Any(l => l.TrimEnd().EndsWith(".")))
-        {
-            score -= 3;
-        }
-
-        // Check if lines look like command continuations
-        var nonEmptyLines = lines.Where(l => !string.IsNullOrWhiteSpace(l)).ToArray();
-        if (nonEmptyLines.Length >= 2)
-        {
-            var hasIndentedContinuation = nonEmptyLines.Skip(1).Any(l =>
-                l.StartsWith("  ") || l.StartsWith("\t"));
-            if (hasIndentedContinuation)
-            {
-                score += 2;
-            }
-        }
-
+        if (lines.Any(IsProseLine)) score -= 1;
         return score;
     }
 
@@ -118,73 +80,39 @@ public class CommandDetector
     {
         var trimmed = line.Trim();
 
-        // Reject if ends with period (likely prose)
-        if (trimmed.EndsWith(".") && !trimmed.EndsWith(".."))
-        {
-            return false;
-        }
+        if (trimmed.Length == 0) return false;
+        if (trimmed.EndsWith(".") && !trimmed.EndsWith("..")) return false;
 
-        // Check for common command indicators
-        return Regex.IsMatch(trimmed, @"^[\w\-./\\]+\s") ||
-               trimmed.Contains('|') ||
-               trimmed.Contains("&&") ||
-               trimmed.StartsWith("$") ||
-               trimmed.StartsWith(">");
+        var pattern = @"^(sudo\s+)?[A-Za-z0-9./~_-]+(?:\s+|\z)";
+        return Regex.IsMatch(trimmed, pattern);
+    }
+
+    private static bool IsProseLine(string line)
+    {
+        var trimmed = line.TrimEnd();
+        return trimmed.EndsWith(".") && !trimmed.EndsWith("..");
     }
 
     public string Flatten(string text)
     {
-        var lines = text.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
-        var result = new List<string>();
-        var currentLine = "";
+        const string BlankPlaceholder = "__WINTRIMMY_BLANK__";
 
-        const string blankPlaceholder = "\u0000BLANK\u0000";
-
-        for (int i = 0; i < lines.Count; i++)
-        {
-            var line = lines[i];
-
-            // Handle blank lines
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                if (_settings.PreserveBlankLines && !string.IsNullOrEmpty(currentLine))
-                {
-                    result.Add(currentLine.Trim());
-                    result.Add(blankPlaceholder);
-                    currentLine = "";
-                }
-                continue;
-            }
-
-            // Handle line continuations (backslash)
-            if (line.TrimEnd().EndsWith("\\"))
-            {
-                var withoutBackslash = line.TrimEnd()[..^1].TrimEnd();
-                currentLine += (currentLine.Length > 0 ? " " : "") + withoutBackslash;
-            }
-            else
-            {
-                currentLine += (currentLine.Length > 0 ? " " : "") + line.Trim();
-            }
-        }
-
-        if (!string.IsNullOrEmpty(currentLine))
-        {
-            result.Add(currentLine.Trim());
-        }
-
-        var flattened = string.Join(" ", result);
-
-        // Replace blank placeholders back
+        var result = text;
         if (_settings.PreserveBlankLines)
         {
-            flattened = flattened.Replace($" {blankPlaceholder} ", "\n\n");
-            flattened = flattened.Replace(blankPlaceholder, "\n");
+            result = Regex.Replace(result, @"\n\s*\n", BlankPlaceholder, RegexOptions.Multiline);
         }
 
-        // Normalize multiple spaces
-        flattened = Regex.Replace(flattened, @"  +", " ");
+        result = BoxCleanupPattern.Replace(result, "$1$2");
+        result = BackslashContinuation.Replace(result, " ");
+        result = LineCollapse.Replace(result, " ");
+        result = WhitespaceCollapse.Replace(result, " ");
 
-        return flattened.Trim();
+        if (_settings.PreserveBlankLines)
+        {
+            result = result.Replace(BlankPlaceholder, "\n\n");
+        }
+
+        return result.Trim();
     }
 }

@@ -33,15 +33,14 @@ public class ClipboardMonitor : IDisposable
 
     private void Timer_Tick(object? sender, EventArgs e)
     {
-        if (!_settings.AutoTrimEnabled) return;
-
         TrimClipboardIfNeeded();
     }
 
-    public void TrimClipboardIfNeeded()
+    public void TrimClipboardIfNeeded(bool force = false)
     {
         try
         {
+            if (!force && !_settings.AutoTrimEnabled) return;
             if (!Clipboard.ContainsText()) return;
 
             var text = Clipboard.GetText();
@@ -55,21 +54,40 @@ public class ClipboardMonitor : IDisposable
 
             _lastClipboardContent = text;
 
-            // Clean box drawing characters first
-            var cleaned = _detector.CleanBoxDrawingCharacters(text);
+            var currentText = text;
+            var wasTransformed = false;
 
-            // Try to transform if it looks like a command
-            var transformed = _detector.TransformIfCommand(cleaned);
-
-            if (transformed != null && transformed != text)
+            var cleaned = _detector.CleanBoxDrawingCharacters(currentText);
+            if (cleaned != null)
             {
-                _isOurWrite = true;
-                Clipboard.SetText(transformed);
-                _lastClipboardContent = transformed;
-
-                var summary = Ellipsize(transformed, 90);
-                OnClipboardTrimmed?.Invoke(summary);
+                currentText = cleaned;
+                wasTransformed = true;
             }
+
+            var transformed = _detector.TransformIfCommand(currentText);
+            if (transformed != null)
+            {
+                currentText = transformed;
+                wasTransformed = true;
+            }
+            else if (force && ShouldForceFlatten(currentText))
+            {
+                var flattened = _detector.Flatten(currentText);
+                if (flattened != currentText)
+                {
+                    currentText = flattened;
+                    wasTransformed = true;
+                }
+            }
+
+            if (!wasTransformed) return;
+
+            _isOurWrite = true;
+            Clipboard.SetText(currentText);
+            _lastClipboardContent = currentText;
+
+            var summary = Ellipsize(currentText, 90);
+            OnClipboardTrimmed?.Invoke(summary);
         }
         catch
         {
@@ -78,31 +96,7 @@ public class ClipboardMonitor : IDisposable
         }
     }
 
-    public void ForceTrim()
-    {
-        try
-        {
-            if (!Clipboard.ContainsText()) return;
-
-            var text = Clipboard.GetText();
-            var cleaned = _detector.CleanBoxDrawingCharacters(text);
-            var flattened = _detector.Flatten(cleaned);
-
-            if (flattened != text)
-            {
-                _isOurWrite = true;
-                Clipboard.SetText(flattened);
-                _lastClipboardContent = flattened;
-
-                var summary = Ellipsize(flattened, 90);
-                OnClipboardTrimmed?.Invoke(summary);
-            }
-        }
-        catch
-        {
-            // Silently fail
-        }
-    }
+    public void ForceTrim() => TrimClipboardIfNeeded(force: true);
 
     private static string Ellipsize(string text, int maxLength)
     {
@@ -110,6 +104,16 @@ public class ClipboardMonitor : IDisposable
 
         var halfLength = (maxLength - 3) / 2;
         return text[..halfLength] + "..." + text[^halfLength..];
+    }
+
+    internal static bool ShouldForceFlatten(string text)
+    {
+        if (!text.Contains('\n')) return false;
+
+        var segments = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0) return false;
+
+        return segments.Length <= 10;
     }
 
     public void Dispose()

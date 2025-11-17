@@ -6,6 +6,7 @@ public class TrayApplicationContext : ApplicationContext
     private readonly AppSettings _settings;
     private readonly ClipboardMonitor _monitor;
     private readonly ContextMenuStrip _contextMenu;
+    private Icon? _currentIcon;
 
     private ToolStripMenuItem _autoTrimItem = null!;
     private ToolStripMenuItem _lowItem = null!;
@@ -26,11 +27,11 @@ public class TrayApplicationContext : ApplicationContext
 
         _trayIcon = new NotifyIcon
         {
-            Icon = CreateTrayIcon(),
             Visible = true,
             Text = "WinTrimmy - Clipboard Command Flattener",
             ContextMenuStrip = _contextMenu
         };
+        SetTrayIcon(CreateTrayIcon());
 
         _trayIcon.DoubleClick += (s, e) => TrimNow();
 
@@ -187,9 +188,17 @@ public class TrayApplicationContext : ApplicationContext
 
     private void UpdateTrayIcon()
     {
-        _trayIcon.Icon = CreateTrayIcon();
+        SetTrayIcon(CreateTrayIcon());
         var status = _settings.AutoTrimEnabled ? "Active" : "Paused";
         _trayIcon.Text = $"WinTrimmy - {status}";
+    }
+
+    private void SetTrayIcon(Icon icon)
+    {
+        var previous = _currentIcon;
+        _trayIcon.Icon = icon;
+        _currentIcon = icon;
+        previous?.Dispose();
     }
 
     private static Icon CreateTrayIcon()
@@ -209,7 +218,17 @@ public class TrayApplicationContext : ApplicationContext
             g.DrawEllipse(pen, 11, 1, 4, 4);
         }
 
-        return Icon.FromHandle(bitmap.GetHicon());
+        var handle = bitmap.GetHicon();
+        try
+        {
+            var icon = Icon.FromHandle(handle);
+            return (Icon)icon.Clone();
+        }
+        finally
+        {
+            DestroyIcon(handle);
+            bitmap.Dispose();
+        }
     }
 
     private void ShowAbout()
@@ -231,6 +250,9 @@ public class TrayApplicationContext : ApplicationContext
         _monitor.Stop();
         _monitor.Dispose();
         _trayIcon.Visible = false;
+        _trayIcon.Icon = null;
+        _currentIcon?.Dispose();
+        _currentIcon = null;
         _trayIcon.Dispose();
         Application.Exit();
     }
@@ -240,9 +262,15 @@ public class TrayApplicationContext : ApplicationContext
         if (disposing)
         {
             _monitor.Dispose();
+            _trayIcon.Icon = null;
+            _currentIcon?.Dispose();
+            _currentIcon = null;
             _trayIcon.Dispose();
             _contextMenu.Dispose();
         }
         base.Dispose(disposing);
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+    private static extern bool DestroyIcon(IntPtr handle);
 }

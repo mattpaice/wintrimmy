@@ -11,12 +11,13 @@ public enum Aggressiveness
 
 public static class AggressivenessExtensions
 {
+    // Thresholds calibrate against the 0-11 score range used in CommandDetector.
     public static int ScoreThreshold(this Aggressiveness aggressiveness) => aggressiveness switch
     {
-        Aggressiveness.Low => 8,
-        Aggressiveness.Normal => 5,
-        Aggressiveness.High => 2,
-        _ => 5
+        Aggressiveness.Low => 3,
+        Aggressiveness.Normal => 2,
+        Aggressiveness.High => 1,
+        _ => 2
     };
 
     public static string Title(this Aggressiveness aggressiveness) => aggressiveness switch
@@ -28,7 +29,15 @@ public static class AggressivenessExtensions
     };
 }
 
-public class AppSettings
+public interface ITrimSettings
+{
+    Aggressiveness Aggressiveness { get; }
+    bool PreserveBlankLines { get; }
+    bool AutoTrimEnabled { get; }
+    bool RemoveBoxDrawing { get; }
+}
+
+public class AppSettings : ITrimSettings
 {
     private static readonly string SettingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -49,14 +58,18 @@ public class AppSettings
             if (File.Exists(SettingsPath))
             {
                 var json = File.ReadAllText(SettingsPath);
-                return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+                var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+                settings.EnsureLaunchAtLoginState();
+                return settings;
             }
         }
         catch
         {
             // If loading fails, return defaults
         }
-        return new AppSettings();
+        var defaults = new AppSettings();
+        defaults.EnsureLaunchAtLoginState();
+        return defaults;
     }
 
     public void Save()
@@ -83,6 +96,11 @@ public class AppSettings
         LaunchAtLogin = enabled;
         Save();
         LaunchAtLoginManager.SetEnabled(enabled);
+    }
+
+    private void EnsureLaunchAtLoginState()
+    {
+        LaunchAtLoginManager.SetEnabled(LaunchAtLogin);
     }
 }
 
