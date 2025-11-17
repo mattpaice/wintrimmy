@@ -53,7 +53,7 @@ These steps save you from the “why doesn’t this compile/run” rabbit hole w
 - **Use the solution file.** All commands (`dotnet build`, `dotnet test`) should reference `WinTrimmy.sln` so both the app and xUnit project get built with the same SDK.
 - **Running tests:** `dotnet test WinTrimmy.sln` (or `.\\WinTrimmy.Tests\\WinTrimmy.Tests.csproj`) executes the heuristic parity suite. Make sure you’re on Windows so the WindowsDesktop SDK is available.
 - **Global clones inside WSL/Linux:** Restoring is fine, but `dotnet build`/`test` will fail because the WindowsDesktop targets aren’t available. Do CI or manual test runs from Windows.
-- **Tray icon (.ico) note:** The WinForms tray icon is drawn programmatically, so there is no `trimmy.ico` in the repo. If you want a custom icon, drop `trimmy.ico` next to `WinTrimmy.csproj` and add `<ApplicationIcon>trimmy.ico</ApplicationIcon>` back into the project file.
+- **Tray icon (.ico) note:** A minimalist `trimmy.ico` (scissors) is included. Swap it out with your own artwork if you like—just overwrite the file or update `<ApplicationIcon>` in `WinTrimmy.csproj`.
 - **Copy/paste tips:** The detector now handles Unix `\` continuations and PowerShell caret/backtick pipelines. If you still need literal multi-line PS scripts to remain untouched, temporarily toggle Auto-Trim from the tray menu.
 - **Template engine permissions:** On locked-down environments (e.g., WSL), dotnet templates try to write under `~/.templateengine`. If that path is read-only, set `DOTNET_CLI_HOME=.` when running `dotnet new`/`dotnet sln`.
 
