@@ -4,7 +4,6 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
-    <ApplicationIcon>trimmy.ico</ApplicationIcon>
     <AssemblyName>WinTrimmy</AssemblyName>
     <RootNamespace>WinTrimmy</RootNamespace>
     <Version>1.0.0</Version>
