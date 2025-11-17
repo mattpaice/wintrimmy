@@ -39,6 +39,22 @@ dotnet run
 dotnet publish -c Release -r win-x64 --self-contained true
 ```
 
+## Development setup & prerequisites
+
+These steps save you from the “why doesn’t this compile/run” rabbit hole we already hit:
+
+- **Windows is required to run or test the app.** The project targets `net8.0-windows` with WinForms. Linux/macOS machines can edit the code, but they cannot build/run without the Windows Desktop SDK (which Microsoft only ships on Windows).
+- **Install the .NET 8 SDK + WindowsDesktop workload.** Either install Visual Studio 2022 with “.NET desktop development”, or run:
+  ```powershell
+  winget install Microsoft.DotNet.SDK.8
+  ```
+  Verify with `dotnet --list-sdks` – you should see an `8.0.x` entry in addition to any 9.0 preview you might have.
+- **Use the solution file.** All commands (`dotnet build`, `dotnet test`) should reference `WinTrimmy.sln` so both the app and xUnit project get built with the same SDK.
+- **Running tests:** `dotnet test WinTrimmy.sln` (or `.\\WinTrimmy.Tests\\WinTrimmy.Tests.csproj`) executes the heuristic parity suite. Make sure you’re on Windows so the WindowsDesktop SDK is available.
+- **Global clones inside WSL/Linux:** Restoring is fine, but `dotnet build`/`test` will fail because the WindowsDesktop targets aren’t available. Do CI or manual test runs from Windows.
+- **Tray icon (.ico) note:** The WinForms tray icon is drawn programmatically, so there is no `trimmy.ico` in the repo. If you want a custom icon, drop `trimmy.ico` next to `WinTrimmy.csproj` and add `<ApplicationIcon>trimmy.ico</ApplicationIcon>` back into the project file.
+- **Template engine permissions:** On locked-down environments (e.g., WSL), dotnet templates try to write under `~/.templateengine`. If that path is read-only, set `DOTNET_CLI_HOME=.` when running `dotnet new`/`dotnet sln`.
+
 ## Installation
 
 1. Build or download the release
