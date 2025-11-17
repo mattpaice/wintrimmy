@@ -11,16 +11,18 @@ public class CommandDetector
     private static readonly Regex CommandPreamble = new(@"(?m)^\s*(sudo\s+)?[A-Za-z0-9./~_-]+", RegexOptions.Compiled);
     private static readonly Regex PipePattern = new(@"\|", RegexOptions.Compiled);
     private static readonly Regex ChainOperatorsPattern = new(@"&&|;|\|\||&", RegexOptions.Compiled);
-    private static readonly Regex PromptPattern = new(@"(^|\n)\s*\$", RegexOptions.Compiled | RegexOptions.Multiline);
-    private static readonly Regex WordCharacterAfterSpace = new(@"[-/]", RegexOptions.Compiled);
+    private static readonly Regex PromptPattern = new(@"(^|\n)\s*(\$|PS [^>]+>)", RegexOptions.Compiled | RegexOptions.Multiline);
+    private static readonly Regex WordCharacterAfterSpace = new(@"[-/\\]", RegexOptions.Compiled);
     private static readonly Regex WhitespaceCollapse = new(@"\s+", RegexOptions.Compiled);
     private static readonly Regex LineCollapse = new(@"\n+", RegexOptions.Compiled);
     private static readonly Regex BackslashContinuation = new(@"\\\s*\n", RegexOptions.Compiled);
-    private static readonly Regex CommonCommandsPattern = new(@"(?mi)^\s*(sudo|apt|yum|brew|npm|yarn|pip|cargo|dotnet|git|docker|kubectl|helm|az|gcloud|terraform)\b", RegexOptions.Compiled);
+    private static readonly Regex CommonCommandsPattern = new(@"(?mi)^\s*(sudo|apt|yum|brew|npm|yarn|pip|cargo|dotnet|git|docker|kubectl|helm|az|gcloud|terraform|winget|Get-[A-Za-z]+|Set-[A-Za-z]+|New-[A-Za-z]+|Invoke-[A-Za-z]+)\b", RegexOptions.Compiled);
     private static readonly Regex LongFlagPattern = new(@"--[A-Za-z0-9-]+", RegexOptions.Compiled);
     private static readonly Regex ShortFlagPattern = new(@"(?<!-)-[A-Za-z0-9]", RegexOptions.Compiled);
-    private static readonly Regex DirectoryCommandPattern = new(@"(?mi)^\s*(cd|export|set|source)\b", RegexOptions.Compiled);
+    private static readonly Regex DirectoryCommandPattern = new(@"(?mi)^\s*(cd|export|set|source|Push-Location|Pop-Location)\b", RegexOptions.Compiled);
     private static readonly Regex ScriptInvocationPattern = new(@"(?mi)^\s*\.[\\/]", RegexOptions.Compiled);
+    private static readonly Regex CaretContinuation = new(@"\^\s*\r?\n", RegexOptions.Compiled);
+    private static readonly Regex BacktickContinuation = new(@"`[ \t]*\r?\n", RegexOptions.Compiled);
 
     private readonly ITrimSettings _settings;
 
@@ -61,16 +63,18 @@ public class CommandDetector
     {
         var score = 0;
         if (text.Contains("\\\n")) score += 1;
+        if (text.Contains("^\n") || text.Contains("^\r\n")) score += 1;
+        if (text.Contains("`\n") || text.Contains("`\r\n")) score += 1;
         if (PipePattern.IsMatch(text)) score += 1;
         if (ChainOperatorsPattern.IsMatch(text)) score += 1;
         if (PromptPattern.IsMatch(text)) score += 1;
         if (lines.All(IsLikelyCommandLine)) score += 1;
-        if (CommandPreamble.IsMatch(text)) score += 1;
+        if (CommandPreamble.IsMatch(text) || IsPowerShellVerb(text)) score += 1;
         if (WordCharacterAfterSpace.IsMatch(text)) score += 1;
         if (CommonCommandsPattern.IsMatch(text)) score += 1;
         if (LongFlagPattern.IsMatch(text) || ShortFlagPattern.IsMatch(text)) score += 1;
         if (DirectoryCommandPattern.IsMatch(text)) score += 1;
-        if (ScriptInvocationPattern.IsMatch(text)) score += 1;
+        if (ScriptInvocationPattern.IsMatch(text) || text.Contains("%USERPROFILE%")) score += 1;
 
         if (lines.Any(IsProseLine)) score -= 1;
         return score;
@@ -93,6 +97,11 @@ public class CommandDetector
         return trimmed.EndsWith(".") && !trimmed.EndsWith("..");
     }
 
+    private static bool IsPowerShellVerb(string text)
+    {
+        return Regex.IsMatch(text, @"(?mi)^\s*(Get|Set|New|Remove|Start|Stop|Invoke)-[A-Za-z]", RegexOptions.Compiled);
+    }
+
     public string Flatten(string text)
     {
         const string BlankPlaceholder = "__WINTRIMMY_BLANK__";
@@ -105,6 +114,8 @@ public class CommandDetector
 
         result = BoxCleanupPattern.Replace(result, "$1$2");
         result = BackslashContinuation.Replace(result, " ");
+        result = CaretContinuation.Replace(result, " ");
+        result = BacktickContinuation.Replace(result, " ");
         result = LineCollapse.Replace(result, " ");
         result = WhitespaceCollapse.Replace(result, " ");
 

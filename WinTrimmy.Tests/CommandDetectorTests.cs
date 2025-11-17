@@ -140,6 +140,43 @@ public class CommandDetectorTests
         Assert.Null(result);
     }
 
+    [Fact]
+    public void DetectsPowerShellPipeline()
+    {
+        var detector = new CommandDetector(new TestTrimSettings());
+        var text = """
+        Get-Process
+        | Sort-Object CPU -Descending
+        | Select-Object -First 3 Name, CPU
+        """;
+
+        var result = detector.TransformIfCommand(text);
+
+        Assert.Equal("Get-Process | Sort-Object CPU -Descending | Select-Object -First 3 Name, CPU", result);
+    }
+
+    [Fact]
+    public void FlattensCaretContinuations()
+    {
+        var detector = new CommandDetector(new TestTrimSettings());
+        var text = "Get-Process ^\r\n  | Select-Object ^\r\n  -First 2";
+
+        var result = detector.TransformIfCommand(text);
+
+        Assert.Equal("Get-Process | Select-Object -First 2", result);
+    }
+
+    [Fact]
+    public void FlattensBacktickContinuations()
+    {
+        var detector = new CommandDetector(new TestTrimSettings());
+        var text = "Set-Location `\r\n  $env:USERPROFILE";
+
+        var result = detector.TransformIfCommand(text);
+
+        Assert.Equal("Set-Location $env:USERPROFILE", result);
+    }
+
     private sealed class TestTrimSettings : ITrimSettings
     {
         public Aggressiveness Aggressiveness { get; set; } = Aggressiveness.Normal;
